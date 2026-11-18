@@ -4,9 +4,40 @@ import { db } from '../firebase';
 /**
  * Crea/actualiza empleadoByUid/{uid} con { empresaId }. Debe llamarlo el propio empleado (tras crear su cuenta).
  */
-export async function setEmpleadoByUid(uid, empresaId) {
-  if (!uid || !empresaId) return;
-  await setDoc(doc(db, 'empleadoByUid', uid), { empresaId });
+export async function setEmpleadoByUid(uid, empresaId, empleadoId) {
+  if (!uid || !empresaId || !empleadoId) {
+    throw new Error('La asignación requiere UID, empresa y empleado.');
+  }
+
+  const empleadoSnap = await getDoc(doc(db, 'empleados', empleadoId));
+
+  if (!empleadoSnap.exists()) {
+    throw new Error('El empleado ya no existe.');
+  }
+
+  const empleado = empleadoSnap.data();
+
+  if (empleado.uid !== uid || empleado.empresaId !== empresaId) {
+    throw new Error('La asignación no coincide con el registro del empleado.');
+  }
+
+  const referencia = doc(db, 'empleadoByUid', uid);
+  const asignacionSnap = await getDoc(referencia);
+
+  if (asignacionSnap.exists()) {
+    const asignacion = asignacionSnap.data();
+
+    if (
+      asignacion.empleadoId !== empleadoId ||
+      asignacion.empresaId !== empresaId
+    ) {
+      throw new Error('La asignación anterior requiere revisión del administrador.');
+    }
+
+    return;
+  }
+
+  await setDoc(referencia, { empresaId, empleadoId });
 }
 
 function normalizarEmpresaId(id) {
@@ -17,9 +48,7 @@ function normalizarEmpresaId(id) {
  * Devuelve el empresaId del empleado (desde empleadoByUid). Null si no existe. Normaliza empresal -> empresa1.
  */
 export async function getEmpresaIdEmpleado(uid) {
-  if (!uid) return null;
-  const snap = await getDoc(doc(db, 'empleadoByUid', uid));
-  return snap.exists() ? normalizarEmpresaId(snap.data().empresaId) : null;
+  return ensureEmpleadoByUid(uid);
 }
 
 /**
@@ -28,18 +57,31 @@ export async function getEmpresaIdEmpleado(uid) {
  */
 export async function ensureEmpleadoByUid(uid) {
   if (!uid) return null;
-  const ref = doc(db, 'empleadoByUid', uid);
-  const snap = await getDoc(ref);
-  if (snap.exists()) return normalizarEmpresaId(snap.data().empresaId);
+
   const empleadosSnap = await getDocs(
-    query(collection(db, 'empleados'), where('uid', '==', uid), limit(1))
+    query(
+      collection(db, 'empleados'),
+      where('uid', '==', uid),
+      limit(2)
+    )
   );
+
   if (empleadosSnap.empty) return null;
-  let empresaId = empleadosSnap.docs[0].data().empresaId;
-  if (!empresaId) return null;
-  if (empresaId === 'empresal') empresaId = 'empresa1';
-  await setDoc(ref, { empresaId });
-  return empresaId;
+
+  if (empleadosSnap.size !== 1) {
+    throw new Error('La cuenta tiene varios registros de empleado. Requiere revisión.');
+  }
+
+  const empleadoDoc = empleadosSnap.docs[0];
+  const empresaId = empleadoDoc.data().empresaId;
+
+  if (!empresaId) {
+    throw new Error('El registro del empleado no tiene empresa.');
+  }
+
+  await setEmpleadoByUid(uid, empresaId, empleadoDoc.id);
+
+  return normalizarEmpresaId(empresaId);
 }
 
 /**

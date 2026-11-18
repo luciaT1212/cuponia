@@ -2,12 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { getRubros } from '../services/ofertasService';
-import {
-  createUserWithEmailAndPassword,
-  signOut,
-  signInWithEmailAndPassword,
-} from 'firebase/auth';
-import { auth } from '../firebase';
+import { crearEmpleadoConCuenta } from '../services/empleadosAuthService';
 import {
   getEmpresaByAdminUid,
   getOfertasPorEmpresa,
@@ -17,10 +12,8 @@ import {
   uploadOfertaImagen,
   addEmpleado,
   updateEmpleado,
-  setEmpleadoUid,
   deleteEmpleado,
 } from '../services/adminService';
-import { setEmpleadoByUid } from '../services/canjeService';
 import { IconPencil } from '../components/icons';
 
 const PRIMARY = '#2097A9';
@@ -74,8 +67,7 @@ export default function PanelEmpresaPage() {
   correo: '',
   crearCuenta: false,
   contraseña: '',
-  tuContraseña: '',
-});
+  });
 const [credencialesCreadas, setCredencialesCreadas] = useState(null);
   const [empleadosLoadError, setEmpleadosLoadError] = useState(null);
   const [form, setForm] = useState({
@@ -315,7 +307,7 @@ const [credencialesCreadas, setCredencialesCreadas] = useState(null);
 
   const openCreateFormEmpleado = () => {
     setEditingEmpleado(null);
-    setFormEmpleado({ nombres: '', apellidos: '', correo: '', crearCuenta: false, contraseña: '', tuContraseña: '' });
+    setFormEmpleado({ nombres: '', apellidos: '', correo: '', crearCuenta: false, contraseña: '', });
     setCredencialesCreadas(null);
     setError('');
     setShowFormEmpleado(true);
@@ -328,8 +320,7 @@ const [credencialesCreadas, setCredencialesCreadas] = useState(null);
       correo: e.correo ?? '',
       crearCuenta: false,
       contraseña: '',
-      tuContraseña: '',
-    });
+      });
     setError('');
     setShowFormEmpleado(true);
   };
@@ -354,57 +345,39 @@ const [credencialesCreadas, setCredencialesCreadas] = useState(null);
     if (crearCuenta) {
       if (!(formEmpleado.contraseña || '').trim()) { setError('Ingresá la contraseña para el empleado.'); return; }
       if (formEmpleado.contraseña.length < 6) { setError('La contraseña del empleado debe tener al menos 6 caracteres.'); return; }
-      if (!(formEmpleado.tuContraseña || '').trim()) { setError('Ingresá tu contraseña actual para poder volver a tu sesión.'); return; }
     }
     setError('');
     setSavingEmpleado(true);
     try {
       if (editingEmpleado) {
-        await updateEmpleado(editingEmpleado.id, formEmpleado, { empresaAdminUid: user.uid });
+        await updateEmpleado(editingEmpleado.id, formEmpleado);
         setEditingEmpleado(null);
         setShowFormEmpleado(false);
-        setFormEmpleado({ nombres: '', apellidos: '', correo: '', crearCuenta: false, contraseña: '', tuContraseña: '' });
+        setFormEmpleado({ nombres: '', apellidos: '', correo: '', crearCuenta: false, contraseña: '', });
         await refetch();
       } else if (crearCuenta) {
-        const newId = await addEmpleado({
-          nombres: formEmpleado.nombres,
-          apellidos: formEmpleado.apellidos,
-          correo: formEmpleado.correo,
-          empresaId: empleadosEmpresaId || empresa.id,
-          empresaAdminUid: user.uid,
-          uid: null,
-        });
-        const adminEmail = user.email;
-        const adminPassword = formEmpleado.tuContraseña;
-        await createUserWithEmailAndPassword(
-          auth,
-          (formEmpleado.correo || '').trim().toLowerCase(),
+        const resultado = await crearEmpleadoConCuenta(
+          {
+            nombres: formEmpleado.nombres,
+            apellidos: formEmpleado.apellidos,
+            correo: formEmpleado.correo,
+            empresaId: empleadosEmpresaId || empresa.id,
+          },
           formEmpleado.contraseña
         );
-        try {
-          await setEmpleadoUid(newId, auth.currentUser.uid);
-          await setEmpleadoByUid(auth.currentUser.uid, empleadosEmpresaId || empresa.id);
-        } catch {
-          await signOut(auth);
-          setError('El empleado se creó pero no se pudo vincular la cuenta (revisá reglas de Firestore). Cerrá sesión y entrá de nuevo con tu correo de admin.');
-          setSavingEmpleado(false);
-          return;
-        }
-        await signOut(auth);
-        try {
-          await signInWithEmailAndPassword(auth, adminEmail, adminPassword);
-        } catch {
-          navigate('/iniciar-sesion', { replace: true, state: { message: 'Empleado creado. No se pudo volver a tu sesión (tu contraseña de admin no es correcta). Entrá con tu correo de admin.' } });
-          setSavingEmpleado(false);
-          return;
-        }
-        navigate('/panel-empresa', { replace: true });
+
         setCredencialesCreadas({
-          correo: (formEmpleado.correo || '').trim().toLowerCase(),
+          correo: resultado.correo,
           contraseña: formEmpleado.contraseña,
         });
         setShowFormEmpleado(false);
-        setFormEmpleado({ nombres: '', apellidos: '', correo: '', crearCuenta: false, contraseña: '', tuContraseña: '' });
+        setFormEmpleado({
+          nombres: '',
+          apellidos: '',
+          correo: '',
+          crearCuenta: false,
+          contraseña: '',
+          });
         await refetch();
       } else {
         const newId = await addEmpleado({
@@ -421,7 +394,7 @@ const [credencialesCreadas, setCredencialesCreadas] = useState(null);
           uid: null,
         }]);
         setShowFormEmpleado(false);
-        setFormEmpleado({ nombres: '', apellidos: '', correo: '', crearCuenta: false, contraseña: '', tuContraseña: '' });
+        setFormEmpleado({ nombres: '', apellidos: '', correo: '', crearCuenta: false, contraseña: '', });
         await refetch();
       }
     } catch (err) {
@@ -748,11 +721,7 @@ const [credencialesCreadas, setCredencialesCreadas] = useState(null);
                           <p className="text-xs text-slate-500 mb-1">Elegí cualquier contraseña; el empleado la usará para iniciar sesión. Podés compartirla después.</p>
                           <input type="password" name="contraseña" value={formEmpleado.contraseña || ''} onChange={handleFormEmpleadoChange} minLength={6} placeholder="Ej. empleado123" className="w-full px-4 py-2 border border-slate-200 rounded-lg bg-white focus:border-[#2097A9] focus:outline-none text-slate-900" />
                         </div>
-                        <div>
-                          <label className="block text-xs font-semibold tracking-wider text-slate-400 uppercase mb-1">Tu contraseña actual (admin) *</label>
-                          <p className="text-xs text-slate-500 mb-1">La contraseña con la que entraste a este panel. Se usa para volver a tu sesión después de crear la cuenta del empleado.</p>
-                          <input type="password" name="tuContraseña" value={formEmpleado.tuContraseña || ''} onChange={handleFormEmpleadoChange} placeholder="Tu contraseña de cafelaesquina@correo.com" className="w-full px-4 py-2 border border-slate-200 rounded-lg bg-white focus:border-[#2097A9] focus:outline-none text-slate-900" />
-                        </div>
+
                       </>
                     )}
                   </>

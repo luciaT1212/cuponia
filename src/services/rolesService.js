@@ -1,7 +1,7 @@
 import { collection, query, where, limit, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
 import { isAdmin, setEmpleadoUid, getEmpresaByAdminUid } from './adminService';
-import { setEmpleadoByUid } from './canjeService';
+import { setEmpleadoByUid, ensureEmpleadoByUid } from './canjeService';
 
 /**
  * Devuelve el rol del usuario: 'admin' | 'adminEmpresa' | 'empleado' | 'cliente'.
@@ -21,7 +21,11 @@ export async function getRolUsuario(uid, email) {
         limit(1)
       )
     );
-    if (!empleadosSnap.empty) return 'empleado';
+    if (!empleadosSnap.empty) {
+      const empresaId = await ensureEmpleadoByUid(uid);
+      if (!empresaId) return 'cliente';
+      return 'empleado';
+    }
     if (email && (email || '').trim()) {
       const correo = (email || '').trim().toLowerCase();
       empleadosSnap = await getDocs(
@@ -36,7 +40,7 @@ export async function getRolUsuario(uid, email) {
         const data = doc.data();
         if (data.uid == null || data.uid === '') {
           await setEmpleadoUid(doc.id, uid);
-          if (data.empresaId) await setEmpleadoByUid(uid, data.empresaId);
+          if (data.empresaId) await setEmpleadoByUid(uid, data.empresaId, doc.id);
           return 'empleado';
         }
       }
